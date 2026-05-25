@@ -303,8 +303,21 @@ case $( uname -s ) in
 esac
 
 if (( print_only )); then
-  BROWSER="echo"
+  printf '%s\n' "$openurl"
+  exit 0
 fi
 
 # open it in a browser
-${BROWSER:-$open} "$openurl"
+if [[ -n "$BROWSER" ]]; then
+  if [[ -x "$BROWSER" ]]; then
+    "$BROWSER" "$openurl"
+    exit $?
+  fi
+
+  if command -v -- "$BROWSER" >/dev/null 2>&1; then
+    "$BROWSER" "$openurl"
+    exit $?
+  fi
+fi
+
+"$open" "$openurl"
