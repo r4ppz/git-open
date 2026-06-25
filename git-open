@@ -320,4 +320,4 @@ if [[ -n "$BROWSER" ]]; then
   fi
 fi
 
-"$open" "$openurl"
+"$open" "$openurl" &>/dev/null &
