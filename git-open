@@ -27,6 +27,12 @@ p,print!      just print the url
 # shellcheck source=/dev/null
 SUBDIRECTORY_OK='Yes' . "$(git --exec-path)/git-sh-setup"
 
+# Ensure we are inside a git repository
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Not a git repository." >&2
+  exit 1
+fi
+
 # Defaults
 is_commit=0
 is_issue=0
@@ -37,23 +43,30 @@ file_flag=""
 
 while test $# != 0; do
   case "$1" in
-  --commit) is_commit=1;;
-  --issue) is_issue=1;;
-  --suffix=*) suffix_flag="$1";;
-  --file=*) file_flag="$1";;
-  --print) print_only=1;;
-  --) shift; break ;;
+  --commit) is_commit=1 ;;
+  --issue) is_issue=1 ;;
+  --suffix=*) suffix_flag="$1" ;;
+  --file=*) file_flag="$1" ;;
+  --print) print_only=1 ;;
+  --)
+    shift
+    break
+    ;;
   esac
   shift
 done
 
 # parse suffix from suffix=value
-IFS='=' read -ra suffix_flag <<< "$suffix_flag"
-function join_by { local IFS="$1"; shift; echo "$*"; }
+IFS='=' read -ra suffix_flag <<<"$suffix_flag"
+function join_by {
+  local IFS="$1"
+  shift
+  echo "$*"
+}
 suffix=$(join_by "=" "${suffix_flag[@]:1}")
 
 # parse file from file=value
-IFS='=' read -ra file_flag <<< "$file_flag"
+IFS='=' read -ra file_flag <<<"$file_flag"
 file=$(join_by "=" "${file_flag[@]:1}")
 
 # are we in a git repo?
@@ -183,7 +196,7 @@ remote_ref=${upstream_branch:-${branch:-$(git describe --tags --exact-match 2>/d
 # Split arguments on '/'
 IFS='/' read -r -a pathargs <<<"$urlpath"
 
-if (( is_issue )); then
+if ((is_issue)); then
   # For issues, take the numbers and preprend 'issues/'
   [[ $remote_ref =~ [0-9]+ ]]
   providerBranchRef="/issues/${BASH_REMATCH[0]}"
@@ -205,11 +218,11 @@ elif [[ "${#pathargs[@]}" -ge 3 && ${pathargs[${#pathargs[@]} - 3]} == 'scm' ]];
   # Anything before the 'scm' is part of the server's root context
 
   # If there are other context parts, add them, up to (but not including) the found 'scm'
-  pathPref=("${pathargs[*]:0:${#pathargs[@]} - 3}")
+  pathPref=("${pathargs[*]:0:${#pathargs[@]}-3}")
 
   # Replace the 'scm' element, with 'projects'. Keep the first argument, the string 'repos', and finally the rest of the arguments.
   # shellcheck disable=SC2206
-  pathargs=(${pathPref[@]} 'projects' ${pathargs[${#pathargs[@]} - 2]} 'repos' "${pathargs[@]:${#pathargs[@]} - 1}")
+  pathargs=(${pathPref[@]} 'projects' ${pathargs[${#pathargs[@]} - 2]} 'repos' "${pathargs[@]:${#pathargs[@]}-1}")
   IFS='/' urlpath="${pathargs[*]}"
   providerBranchRef="/browse?at=$remote_ref"
 elif [[ "$domain" == *"bitbucket"* ]] && [[ $gitprotocol == 'ssh' ]]; then
@@ -218,12 +231,12 @@ elif [[ "$domain" == *"bitbucket"* ]] && [[ $gitprotocol == 'ssh' ]]; then
 
   # Build the repo url starting with 'projects' and then keep the first argument, the string 'repos', and finally the rest of the arguments.
   # shellcheck disable=SC2206
-  pathargs=('projects' ${pathargs[${#pathargs[@]} - 2]} 'repos' "${pathargs[@]:${#pathargs[@]} - 1}")
+  pathargs=('projects' ${pathargs[${#pathargs[@]} - 2]} 'repos' "${pathargs[@]:${#pathargs[@]}-1}")
   IFS='/' urlpath="${pathargs[*]}"
   providerBranchRef="/browse?at=$remote_ref"
 elif [[ "${#pathargs[@]}" -ge '2' && ${pathargs[${#pathargs[@]} - 2]} == '_git' ]]; then
   # Visual Studio Team Services and Team Foundation Server always have /_git/ as the second to last segment in the url path
-  if (( is_issue )); then
+  if ((is_issue)); then
     # Switch to workitems, provide work item id if specified
     urlpath="${urlpath%%/_git/*}/_workitems"
     # Handle case for the default repository url
@@ -235,7 +248,7 @@ elif [[ "${#pathargs[@]}" -ge '2' && ${pathargs[${#pathargs[@]} - 2]} == '_git' 
   fi
 elif [[ "$domain" =~ amazonaws\.com$ ]]; then
   # AWS Code Commit
-  if (( is_issue )); then
+  if ((is_issue)); then
     echo "Issue feature does not supported on AWS Code Commit." 1>&2
     exit 1
   fi
@@ -267,42 +280,43 @@ elif [[ "$domain" =~ cnb\.cool$ ]]; then
 fi
 openurl="$protocol://$domain/$urlpath"
 
-if (( is_commit )); then
-    sha=$(git rev-parse HEAD)
-    openurl="$openurl/commit/$sha"
+if ((is_commit)); then
+  sha=$(git rev-parse HEAD)
+  openurl="$openurl/commit/$sha"
 elif [[ $remote_ref != "master" || "$file" ]]; then
-    # simplify URL for master
-    openurl="$openurl$providerBranchRef"
+  # simplify URL for master
+  openurl="$openurl$providerBranchRef"
 fi
 
 if [ "$file" ]; then
-    absfile=$(git ls-tree --full-name --name-only "$branch" "$file")
-    if [[ -z "$absfile" ]]; then
-      echo "File $file is not in repository" 1>&2
-      exit 1
-    fi
-    openurl="$openurl/$absfile"
+  absfile=$(git ls-tree --full-name --name-only "$branch" "$file")
+  if [[ -z "$absfile" ]]; then
+    echo "File $file is not in repository" 1>&2
+    exit 1
+  fi
+  openurl="$openurl/$absfile"
 fi
 
 if [ "$suffix" ]; then
-    openurl="$openurl/$suffix"
+  openurl="$openurl/$suffix"
 fi
 
 # get current open browser command
-case $( uname -s ) in
-  Darwin)   open='open';;
-  MINGW*)   open='start';;
-  MSYS*)    open='start';;
-  CYGWIN*)  open='cygstart';;
-  *)        # Try to detect WSL (Windows Subsystem for Linux)
-            if uname -r | grep -q -i Microsoft; then
-              open='/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile Start'
-            else
-              open='xdg-open'
-            fi;;
+case $(uname -s) in
+Darwin) open='open' ;;
+MINGW*) open='start' ;;
+MSYS*) open='start' ;;
+CYGWIN*) open='cygstart' ;;
+*) # Try to detect WSL (Windows Subsystem for Linux)
+  if uname -r | grep -q -i Microsoft; then
+    open='/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile Start'
+  else
+    open='xdg-open'
+  fi
+  ;;
 esac
 
-if (( print_only )); then
+if ((print_only)); then
   printf '%s\n' "$openurl"
   exit 0
 fi
